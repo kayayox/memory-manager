@@ -1,0 +1,243 @@
+Memory Manager Library
+=====================
+
+Una librería en C para gestión eficiente de memoria mediante un sistema de pools con múltiples estrategias de asignación.
+
+Características
+---------------
+- Múltiples estrategias de asignación: First-fit, Best-fit, Worst-fit, Next-fit
+- Sistema cliente-servidor: Gestión centralizada de memoria
+- Thread-safe: Operaciones seguras en entornos multihilo
+- Métricas en tiempo real: Fragmentación, uso, estadísticas
+- Detección de corrupción: Magic numbers y verificaciones de integridad
+- Logging extensivo: Modo debug con información detallada
+- Zero memory leaks: Verificado con Valgrind
+
+Estructura del Proyecto
+-----------------------
+memory_manager/
+├── include/                 # Headers públicos
+│   ├── memory_config.h     # Configuraciones y defines
+│   ├── memory_metrics.h    # Estructuras de métricas
+│   ├── memory_pool.h       # API principal del pool
+│   └── memory_client.h     # API del cliente
+├── src/                    # Implementaciones
+│   ├── memory_internal.h   # Headers internos (privados)
+│   ├── memory_pool.c
+│   ├── memory_client.c
+│   └── memory_metrics.c
+├── examples/               # Ejemplos de uso
+│   └── basic_usage.c
+├── CMakeLists.txt          # Build system con CMake
+├── Makefile                # Build system con Make
+├── compile.sh              # Script de compilación automática
+└── README.txt
+
+Instalación Rápida
+------------------
+
+Prerrequisitos:
+- GCC o Clang
+- CMake (opcional, pero recomendado)
+- pthreads (generalmente incluido en sistemas Unix)
+
+Método 1: CMake (Recomendado)
+------------------------------
+# Clonar o descargar el proyecto
+git clone <repositorio>
+cd memory_manager
+
+# Compilar
+mkdir build && cd build
+cmake -DBUILD_EXAMPLES=ON ..
+make
+
+# Ejecutar ejemplo
+./basic_usage
+
+Método 2: Makefile
+------------------
+make              # Compilación release
+make debug        # Compilación con debug
+make clean        # Limpiar build
+make test         # Compilar y ejecutar ejemplo
+
+Método 3: Script Automático
+---------------------------
+chmod +x compile.sh
+./compile.sh
+
+Método 4: Compilación Manual
+----------------------------
+# Compilar librería
+gcc -c -Iinclude -std=c11 -Wall -Wextra -pthread src/memory_pool.c -o memory_pool.o
+gcc -c -Iinclude -std=c11 -Wall -Wextra -pthread src/memory_client.c -o memory_client.o
+gcc -c -Iinclude -std=c11 -Wall -Wextra -pthread src/memory_metrics.c -o memory_metrics.o
+
+# Crear librería estática
+ar rcs libmemory_manager.a memory_pool.o memory_client.o memory_metrics.o
+
+# Compilar ejemplo
+gcc -Iinclude -std=c11 -Wall -Wextra -pthread examples/basic_usage.c -L. -lmemory_manager -o memory_example
+
+Uso Básico
+----------
+#include <memory_pool.h>
+#include <memory_client.h>
+#include <memory_metrics.h>
+
+int main() {
+    // Crear pool de 1MB con estrategia First-fit
+    memory_pool_t* pool = memory_pool_create(1024 * 1024, ALLOC_FIRST_FIT);
+
+    // Crear clientes
+    memory_client_t* client1 = memory_client_create(1, pool);
+    memory_client_t* client2 = memory_client_create(2, pool);
+
+    // Asignar memoria
+    int* data1 = memory_client_alloc(client1, sizeof(int) * 100);
+    char* data2 = memory_client_alloc(client2, 500);
+
+    // Usar memoria
+    if (data1) data1[0] = 42;
+    if (data2) strcpy(data2, "Hola Mundo");
+
+    // Mostrar métricas
+    memory_pool_print_metrics(pool);
+
+    // Liberar recursos
+    memory_client_free(client1, data1);
+    memory_client_destroy(client1);
+    memory_client_destroy(client2);
+    memory_pool_destroy(pool);
+
+    return 0;
+}
+
+API Principal
+-------------
+
+Gestión de Pools:
+memory_pool_t* pool = memory_pool_create(size_t size, alloc_strategy_t strategy);
+void memory_pool_destroy(memory_pool_t* pool);
+void* memory_pool_alloc(memory_pool_t* pool, size_t size, int client_id);
+int memory_pool_free(memory_pool_t* pool, void* ptr, int client_id);
+
+Gestión de Clientes:
+memory_client_t* client = memory_client_create(int id, memory_pool_t* pool);
+void memory_client_destroy(memory_client_t* client);
+void* memory_client_alloc(memory_client_t* client, size_t size);
+int memory_client_free(memory_client_t* client, void* ptr);
+void memory_client_free_all(memory_client_t* client);
+
+Estrategias de Asignación:
+typedef enum {
+    ALLOC_FIRST_FIT = 0,    // Primer bloque que quepa
+    ALLOC_BEST_FIT = 1,     // Mejor ajuste al tamaño
+    ALLOC_WORST_FIT = 2,    // Bloque más grande disponible
+    ALLOC_NEXT_FIT = 3      // Continúa desde última asignación
+} alloc_strategy_t;
+
+Métricas y Monitoreo:
+void memory_pool_print_metrics(memory_pool_t* pool);
+int memory_pool_check(memory_pool_t* pool);  // Verifica integridad
+
+Ejemplos Avanzados
+------------------
+
+Múltiples Estrategias:
+// Cambiar estrategia en tiempo de ejecución
+memory_pool_set_strategy(pool, ALLOC_BEST_FIT);
+
+// Obtener estrategia actual
+alloc_strategy_t current = memory_pool_get_strategy(pool);
+
+Reasignación de Clientes:
+// Mover cliente a otro pool
+memory_client_reassign_pool(client, new_pool);
+
+Métricas Detalladas:
+pool_metrics_t metrics;
+memory_pool_get_metrics(pool, &metrics);
+printf("Fragmentación: %.1f%%\n", metrics.fragmentation);
+printf("Bloques usados: %d\n", metrics.used_blocks);
+
+Opciones de Compilación
+-----------------------
+
+Flags de CMake:
+cmake -DMEMORY_DEBUG=ON ..          # Habilita logging detallado
+cmake -DBUILD_EXAMPLES=OFF ..       # Desactiva ejemplos
+cmake -DBUILD_TESTS=ON ..           # Compila tests
+
+Flags de Compilación Manual:
+-DMEMORY_DEBUG          # Habilita modo debug
+-DMEMORY_ALIGNMENT=16   # Cambia alineación (por defecto 8)
+-g                      # Información de debug
+-O2                     # Optimización
+
+Integración en Otros Proyectos
+------------------------------
+
+En tu CMakeLists.txt:
+find_package(MemoryManager REQUIRED)
+target_link_libraries(tu_proyecto memory_manager)
+
+Compilación Manual:
+gcc -I/path/to/memory_manager/include tu_codigo.c \
+    -L/path/to/memory_manager/build -lmemory_manager \
+    -pthread -o tu_proyecto
+
+En tu código:
+#include <memory_pool.h>
+#include <memory_client.h>
+
+Solución de Problemas
+---------------------
+
+Error: "undefined reference to pthread":
+# Añadir -pthread al enlazar
+gcc ... -lmemory_manager -pthread
+
+Error: includes no encontrados:
+# Verificar ruta con -I
+gcc -I/path/correcto/include ...
+
+Warning: implicit declaration:
+// Asegúrate de incluir los headers
+#include <memory_pool.h>
+#include <memory_client.h>
+
+Modo Debug:
+# Compilar con logging detallado
+make debug
+# o
+./compile.sh  # El script habilita debug automáticamente
+
+Plataformas Soportadas
+----------------------
+- Linux (GCC, Clang)
+- macOS (Clang)
+- Windows (MinGW-w64)
+- BSD systems
+
+Licencia
+--------
+MIT License - Ver archivo LICENSE para detalles.
+
+Contribuciones
+--------------
+Las contribuciones son bienvenidas. Por favor:
+1. Usa el formato de código establecido
+2. Incluye tests para nuevas funcionalidades
+3. Verifica con Valgrind que no hay memory leaks
+
+Soporte
+-------
+Para reportar bugs o solicitar características:
+- Abre un issue en el repositorio
+- Proporciona un ejemplo mínimo reproducible
+- Incluye información de tu plataforma y compilador
+
+---
+¿Problemas? Revisa los ejemplos en `examples/` o compila en modo debug para obtener información detallada.

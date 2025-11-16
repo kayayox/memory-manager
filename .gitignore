@@ -1,0 +1,27 @@
+# Archivos de compilación
+build/
+*.o
+*.a
+*.so
+*.dll
+*.exe
+
+# Archivos de respaldo
+*~
+*.bak
+*.swp
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Directorios de IDE
+.vscode/
+.idea/
+*.workspace
+
+# Documentación temporal
+docs/_build/
