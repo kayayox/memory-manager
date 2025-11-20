@@ -3,7 +3,7 @@
 
 #include "memory_config.h"
 
-// Estructura opaca del pool (implementación oculta)
+// Estructura opaca del pool
 typedef struct memory_pool memory_pool_t;
 
 // API principal del pool

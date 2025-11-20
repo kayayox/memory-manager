@@ -37,8 +37,8 @@ make release
 
 ## Próximas Implementaciones
 
-- [ ] Estrategia Worst Fit
-- [ ] Estrategia Next Fit  
-- [ ] Pruebas de estrés
-- [ ] Optimización de rendimiento
+- [X] Estrategia Worst Fit
+- [X] Estrategia Next Fit
+- [X] Pruebas de estrés
+- [X] Optimización de rendimiento
 - [ ] Documentación completa

@@ -34,22 +34,14 @@ struct memory_pool {
 struct memory_client {
     int id;
     memory_pool_t* pool;
-    void** allocated_blocks;
-    size_t block_count;
-    size_t block_capacity;
+    void* allocated_blocks;
+    pthread_mutex_t mutex;
 };
 
 // Funciones internas (no exportadas)
 extern int block_is_valid(const block_header_t* block);
 extern int block_in_pool(const memory_pool_t* pool, const block_header_t* block);
 extern void add_to_free_list(memory_pool_t* pool, block_header_t* block);
-/**proximas implementaciones para una mejor seguridad en la busqueda y eleccion
-static int remove_from_free_list(memory_pool_t* pool, block_header_t* block);
-static void fuse_with_neighbors(memory_pool_t* pool, block_header_t* block);
-static block_header_t* find_first_fit(memory_pool_t* pool, size_t size);
-static block_header_t* find_best_fit(memory_pool_t* pool, size_t size);
-static block_header_t* find_worst_fit(memory_pool_t* pool, size_t size);
-static block_header_t* find_next_fit(memory_pool_t* pool, size_t size);*/
 extern void memory_log_internal(memory_log_level_t level, const char* file, int line, const char* format, ...);
 
 #endif // MEMORY_INTERNAL_H

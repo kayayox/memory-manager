@@ -20,25 +20,26 @@ MEMORY_API void memory_pool_get_metrics(void* pool_ptr, pool_metrics_t* metrics)
 
         if (!block_is_valid(block)) break;
 
+        size_t block_total_size = sizeof(block_header_t) + block->size;
+
         metrics->block_count++;
         if (block->used) {
-            metrics->used_memory += block->size;
+            metrics->used_memory += block_total_size;
             metrics->used_blocks++;
         } else {
-            metrics->free_memory += block->size;
+            metrics->free_memory += block_total_size;
             metrics->free_blocks++;
-            if (block->size > metrics->largest_free_block) {
-                metrics->largest_free_block = block->size;
+            if (block_total_size > metrics->largest_free_block) {
+                metrics->largest_free_block = block_total_size;
             }
         }
 
-        size_t block_total_size = sizeof(block_header_t) + block->size;
         if (block_total_size == 0) break;
         current += block_total_size;
     }
-
-    if (metrics->free_memory > 0 && metrics->largest_free_block > 0) {
-        metrics->fragmentation = (1.0 - ((double)metrics->largest_free_block / metrics->free_memory)) * 100.0;
+    if (metrics->free_blocks > 1 && metrics->free_memory > 0) {
+        double fragmentation = (1.0 - ((double)metrics->largest_free_block / metrics->free_memory)) * 100.0;
+        metrics->fragmentation = fragmentation > 0.0 ? fragmentation : 0.0;
     } else {
         metrics->fragmentation = 0.0;
     }

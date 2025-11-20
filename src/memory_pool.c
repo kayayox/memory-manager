@@ -18,7 +18,6 @@ void memory_log_internal(memory_log_level_t level, const char* file, int line, c
 
     fprintf(stderr, "\n");
 }
-
 // Verificación de bloque
 int block_is_valid(const block_header_t* block) {
     return block && block->magic == MAGIC_NUMBER;
@@ -52,6 +51,32 @@ void add_to_free_list(memory_pool_t* pool, block_header_t* block) {
 static int remove_from_free_list(memory_pool_t* pool, block_header_t* block) {
     if (!pool || !block || !block_is_valid(block)) return 0;
 
+    // Verificar si el bloque está realmente en la lista libre
+    int found = 0;
+    block_header_t* current = pool->free_list;
+    int safety_count = 0;
+
+    while (current && safety_count < 1000) {
+        if (current == block) {
+            found = 1;
+            break;
+        }
+        current = current->next;
+        safety_count++;
+    }
+
+    if (!found) {
+        MEMORY_LOG(MEMORY_LOG_WARN, "Intento de remover bloque %p no encontrado en lista libre",
+                   (void*)block);
+        return 0;
+    }
+
+    // Actualizar next_fit si es necesario
+    if (pool->next_fit == block) {
+        pool->next_fit = block->next ? block->next : pool->free_list;
+    }
+
+    // Remover de la lista
     if (block->prev) {
         block->prev->next = block->next;
     } else {
@@ -65,7 +90,6 @@ static int remove_from_free_list(memory_pool_t* pool, block_header_t* block) {
     block->next = NULL;
     block->prev = NULL;
 
-    MEMORY_LOG(MEMORY_LOG_DEBUG, "Bloque removido de lista libre: %p", (void*)block);
     return 1;
 }
 
@@ -84,16 +108,24 @@ static block_header_t* find_first_fit(memory_pool_t* pool, size_t size) {
 static block_header_t* find_best_fit(memory_pool_t* pool, size_t size) {
     block_header_t* current = pool->free_list;
     block_header_t* best = NULL;
+    int safety_count = 0;
 
-    while (current) {
+    while (current && safety_count < 1000) {
         if (current->size >= size) {
             if (!best || current->size < best->size) {
                 best = current;
+                // Si encontramos un ajuste perfecto, salir inmediatamente
                 if (current->size == size) break;
             }
         }
         current = current->next;
+        safety_count++;
     }
+
+    if (safety_count >= 1000) {
+        MEMORY_LOG(MEMORY_LOG_ERROR, "Posible ciclo en lista libre durante BEST_FIT");
+    }
+
     return best;
 }
 
@@ -113,66 +145,103 @@ static block_header_t* find_worst_fit(memory_pool_t* pool, size_t size) {
 }
 
 static block_header_t* find_next_fit(memory_pool_t* pool, size_t size) {
+    if (!pool->free_list) return NULL;
+
     if (!pool->next_fit) {
         pool->next_fit = pool->free_list;
     }
 
-    block_header_t* start = pool->next_fit;
-    block_header_t* current = start;
+    block_header_t* current = pool->next_fit;
+    block_header_t* start = current;
 
     do {
-        if (current && current->size >= size) {
+        if (current->size >= size) {
             pool->next_fit = current->next ? current->next : pool->free_list;
             return current;
         }
-        current = current ? current->next : pool->free_list;
-    } while (current != start);
+        current = current->next ? current->next : pool->free_list;
+    } while (current && current != start);
 
     return NULL;
 }
 
-// Fusión de bloques
 static void fuse_with_neighbors(memory_pool_t* pool, block_header_t* block) {
     if (!pool || !block || !block_is_valid(block)) return;
 
     int fused;
+    int safety_counter = 0;
+    const int MAX_FUSE_ITERATIONS = 100;
+
     do {
         fused = 0;
-        block_header_t* current = pool->free_list;
+        safety_counter++;
 
-        while (current && !fused) {
-            if (!block_is_valid(current)) {
-                current = current->next;
-                continue;
+        // Verificar límite de seguridad
+        if (safety_counter > MAX_FUSE_ITERATIONS) {
+            MEMORY_LOG(MEMORY_LOG_ERROR,
+                       "Límite de fusiones excedido para bloque %p. Posible corrupción.",
+                       (void*)block);
+            break;
+        }
+
+        // Fusión con bloque siguiente
+        block_header_t* next_block = (block_header_t*)((char*)(block + 1) + block->size);
+        if ((char*)next_block < (char*)pool->memory_block + pool->total_size &&
+            block_is_valid(next_block) && !next_block->used) {
+
+            block->size += sizeof(block_header_t) + next_block->size;
+            remove_from_free_list(pool, next_block);
+            next_block->magic = 0;
+            fused = 1;
+
+            MEMORY_LOG(MEMORY_LOG_DEBUG, "Bloques fusionados con siguiente: %p + %p",
+                       (void*)block, (void*)next_block);
+            continue; // Continuar para posible fusión adicional
+        }
+
+        // Fusión con bloque anterior (más eficiente)
+        if ((char*)block > (char*)pool->memory_block) {
+            // Buscar bloque anterior de forma más directa
+            block_header_t* potential_prev = NULL;
+            char* current_pos = (char*)pool->memory_block;
+
+            while (current_pos < (char*)block) {
+                block_header_t* current_block = (block_header_t*)current_pos;
+                if (!block_is_valid(current_block)) break;
+
+                size_t block_total_size = sizeof(block_header_t) + current_block->size;
+                char* next_block_pos = current_pos + block_total_size;
+
+                if (next_block_pos == (char*)block &&
+                    !current_block->used &&
+                    block_is_valid(current_block)) {
+                    potential_prev = current_block;
+                    break;
+                }
+
+                if (block_total_size == 0) break;
+                current_pos += block_total_size;
             }
 
-            char* current_end = (char*)(current + 1) + current->size;
-            char* block_start = (char*)block;
-            char* block_end = (char*)(block + 1) + block->size;
-
-            if (current_end == block_start) {
-                current->size += sizeof(block_header_t) + block->size;
-                block->magic = 0;
+            if (potential_prev) {
+                potential_prev->size += sizeof(block_header_t) + block->size;
                 remove_from_free_list(pool, block);
-                //block = current;
+                block->magic = 0;
+                block = potential_prev;
                 fused = 1;
-                MEMORY_LOG(MEMORY_LOG_DEBUG, "Bloques fusionados: %p + %p",
-                           (void*)current, (void*)block);
-            }
-            else if (block_end == (char*)current) {
-                block->size += sizeof(block_header_t) + current->size;
-                current->magic = 0;
-                remove_from_free_list(pool, current);
-                fused = 1;
-                MEMORY_LOG(MEMORY_LOG_DEBUG, "Bloques fusionados: %p + %p",
-                           (void*)block, (void*)current);
-            } else {
-                current = current->next;
+
+                MEMORY_LOG(MEMORY_LOG_DEBUG, "Bloques fusionados con anterior: %p + %p",
+                           (void*)potential_prev, (void*)block);
+                continue; // Continuar para posible fusión adicional
             }
         }
+
     } while (fused);
 
-    add_to_free_list(pool, block);
+    // Solo agregar a la lista libre si el bloque sigue siendo válido
+    if (block_is_valid(block) && !block->used) {
+        add_to_free_list(pool, block);
+    }
 }
 
 // Implementación de la API pública
@@ -230,6 +299,18 @@ MEMORY_API void memory_pool_destroy(memory_pool_t* pool) {
     if (!pool) return;
 
     pthread_mutex_lock(&pool->mutex);
+
+    if (!pool->active) {
+        pthread_mutex_unlock(&pool->mutex);
+        return;
+    }
+
+    if (pool->metrics.used_blocks > 0) {
+        MEMORY_LOG(MEMORY_LOG_WARN,
+                   "Destruyendo pool con %d bloques aún en uso - posibles leaks",
+                   pool->metrics.used_blocks);
+    }
+
     pool->active = 0;
 
     if (pool->memory_block) {
@@ -292,6 +373,15 @@ MEMORY_API void* memory_pool_alloc(memory_pool_t* pool, size_t size, int client_
     if (remaining >= sizeof(block_header_t) + MIN_BLOCK_SIZE) {
         block_header_t* new_block = (block_header_t*)((char*)(block + 1) + aligned_size);
 
+        if (!block_in_pool(pool, new_block)) {
+            MEMORY_LOG(MEMORY_LOG_ERROR, "Error crítico: split block fuera del pool");
+            // Recuperación: restaurar bloque original
+            add_to_free_list(pool, block);
+            pthread_mutex_unlock(&pool->mutex);
+            pool->metrics.failed_allocations++;
+            return NULL;
+        }
+
         new_block->size = remaining - sizeof(block_header_t);
         new_block->used = 0;
         new_block->client_id = -1;
@@ -300,6 +390,10 @@ MEMORY_API void* memory_pool_alloc(memory_pool_t* pool, size_t size, int client_
 
         block->size = aligned_size;
         add_to_free_list(pool, new_block);
+
+        if (pool->next_fit == block) {
+            pool->next_fit = new_block;
+        }
     }
 
     block->used = 1;
@@ -349,7 +443,7 @@ MEMORY_API int memory_pool_free(memory_pool_t* pool, void* ptr, int client_id) {
     if (!block->used) {
         MEMORY_LOG(MEMORY_LOG_WARN, "Bloque ya libre: %p", (void*)block);
         pthread_mutex_unlock(&pool->mutex);
-        return MEMORY_SUCCESS; // No es un error crítico
+        return MEMORY_SUCCESS;
     }
 
     if (block->client_id != client_id) {
@@ -371,12 +465,12 @@ MEMORY_API int memory_pool_free(memory_pool_t* pool, void* ptr, int client_id) {
     return MEMORY_SUCCESS;
 }
 
-// Resto de implementaciones de memory_pool.c...
 MEMORY_API int memory_pool_set_strategy(memory_pool_t* pool, alloc_strategy_t strategy) {
     if (!pool) return MEMORY_ERROR_INVALID_PARAM;
 
     pthread_mutex_lock(&pool->mutex);
     pool->strategy = strategy;
+    pool->next_fit = NULL;
     pthread_mutex_unlock(&pool->mutex);
 
     return MEMORY_SUCCESS;

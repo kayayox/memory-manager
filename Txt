@@ -239,5 +239,10 @@ Para reportar bugs o solicitar características:
 - Proporciona un ejemplo mínimo reproducible
 - Incluye información de tu plataforma y compilador
 
+Examples
+--------
+Incluye multiples tipos de uso y pruebas realizadas
+Use Makefile incluido en los archivos para los ejecutables
+
 ---
 ¿Problemas? Revisa los ejemplos en `examples/` o compila en modo debug para obtener información detallada.

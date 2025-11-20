@@ -4,7 +4,7 @@
 #include "memory_config.h"
 #include "memory_pool.h"
 
-// Estructura opaca del cliente
+// Estructura del cliente
 typedef struct memory_client memory_client_t;
 
 // API del cliente
